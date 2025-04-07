@@ -8,7 +8,7 @@ import zipfile
 import io
 from scenedetect import VideoManager, SceneManager
 from scenedetect.detectors import ContentDetector
-import whisper  # Whisperの追加
+#import whisper  # Whisperの追加
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
@@ -77,19 +77,19 @@ def detect_cuts(video_path):
 
 # -----------------------------
 # Whisperでトランスクリプト生成
-# -----------------------------
-def generate_transcripts(cutlist, video_path=VIDEO_PATH):
-    model = whisper.load_model("small")  # 他に tiny / small / medium / large もOK
-    result = model.transcribe(video_path, language='ja')
 
-    segments = result.get("segments", [])
-    for cut in cutlist:
-        start = cut["Start(sec)"]
-        end = cut["End(sec)"]
-        texts = [seg["text"] for seg in segments if seg["start"] < end and seg["end"] > start]
-        cut["Transcript"] = "".join(texts).strip()
+# def generate_transcripts(cutlist, video_path=VIDEO_PATH):
+    #model = whisper.load_model("small")  # 他に tiny / small / medium / large もOK
+    #result = model.transcribe(video_path, language='ja')
 
-    return cutlist
+    #segments = result.get("segments", [])
+    #for cut in cutlist:
+     #   start = cut["Start(sec)"]
+      #  end = cut["End(sec)"]
+       # texts = [seg["text"] for seg in segments if seg["start"] < end and seg["end"] > start]
+        #cut["Transcript"] = "".join(texts).strip()
+
+    #return cutlist
 
 # -----------------------------
 # メインページ
@@ -111,7 +111,7 @@ def index():
 
             # カット検出＋トランスクリプト
             cutlist_data = detect_cuts(VIDEO_PATH)
-            cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
+            #cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
 
             # フレーム・Excel生成
             frame_paths = generate_frames(cutlist_data)
@@ -207,4 +207,5 @@ if __name__ == "__main__":
     if os.path.exists(FRAME_FOLDER):
         shutil.rmtree(FRAME_FOLDER)
 
-    app.run(debug=True, port=10000)
+    port = int(os.environ.get("PORT", 10000))  # ←ここ！Render用にポート取得
+    app.run(host="0.0.0.0", port=port)
