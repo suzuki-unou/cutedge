@@ -1,9 +1,5 @@
 Flask
 opencv-python
 pandas
-scenedetect
-whisper
-torch
-torchaudio
-openai-whisper
 xlsxwriter
+scenedetect
