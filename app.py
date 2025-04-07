@@ -207,4 +207,4 @@ if __name__ == "__main__":
     if os.path.exists(FRAME_FOLDER):
         shutil.rmtree(FRAME_FOLDER)
 
-    app.run(debug=True, port=5050)
+    app.run(debug=True, port=10000)
