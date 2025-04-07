@@ -162,6 +162,8 @@ def update_cutlist():
 
         frame_paths = generate_frames(cutlist_data)
         frame_paths = [f"static/{fp.replace('static/', '').replace(os.sep, '/')}" for fp in frame_paths]
+
+        print("📝 Excelに保存するcutlist_data：", cutlist_data)
         save_to_excel(cutlist_data)
 
         print("✅ カットリストとフレームを正常に更新しました")
@@ -180,6 +182,7 @@ def update_cutlist():
         })
 
 
+
 # -----------------------------
 # Excel ダウンロード
 # -----------------------------
@@ -189,6 +192,8 @@ def download_excel():
 
 @app.route("/download_zip")
 def download_zip():
+    save_to_excel(cutlist_data)  # ✅ 念のためここでも保存する
+
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         # Excelファイルを追加
@@ -203,7 +208,13 @@ def download_zip():
                 zipf.write(filepath, arcname=arcname)
 
     zip_buffer.seek(0)
-    return send_file(zip_buffer, as_attachment=True, download_name="cutlist_and_frames.zip", mimetype="application/zip")
+    return send_file(
+        zip_buffer,
+        as_attachment=True,
+        download_name="cutlist_and_frames.zip",
+        mimetype="application/zip"
+    )
+
 
 # -----------------------------
 # アプリ起動
