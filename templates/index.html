@@ -211,9 +211,8 @@
   for (let i = 0; i < updated.length - 1; i++) {
     updated[i]["End(sec)"] = parseFloat((updated[i + 1]["Start(sec)"] - 0.1).toFixed(1));
   }
-  // 最後のカットの終了時間はそのまま（上書きしない）
 
-  // ✅ サーバーへ送信
+  // ✅ サーバーへ送信して保存・ZIPの元データも更新
   fetch("/api/update-cutlist", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -227,12 +226,14 @@
         renderCutlistForm();
         renderTimeline();
         renderFrameGallery();
+        alert("✅ カットリストを保存しました！");
       } else {
         alert("❌ 保存失敗：" + (data.message || "不明なエラー"));
       }
     })
     .catch(err => alert("❌ 通信エラー：" + err));
 }
+
 
 
     function markDeleteAndSave(index) {
