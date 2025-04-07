@@ -94,33 +94,60 @@ def detect_cuts(video_path):
 # -----------------------------
 # メインページ
 # -----------------------------
-@app.route("/", methods=["GET", "POST"])
-def index():
+@app.route("/api/update-cutlist", methods=["POST"])
+def update_cutlist():
     global cutlist_data, frame_paths
+    try:
+        print("✅ /api/update-cutlist にアクセスされた")
 
-    if request.method == "POST":
-        file = request.files["video"]
-        if file:
-            # 保存フォルダ初期化
-            shutil.rmtree(FRAME_FOLDER, ignore_errors=True)
-            os.makedirs(FRAME_FOLDER, exist_ok=True)
-            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        data = request.get_json(force=True)
+        print("📥 受信データ:", data)
 
-            # 動画保存
-            file.save(VIDEO_PATH)
+        cutlist = data.get("cutlist", [])
+        print(f"📊 カット数: {len(cutlist)} 件")
 
-            # カット検出＋トランスクリプト
-            cutlist_data = detect_cuts(VIDEO_PATH)
-            #cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
+        validated = []
+        for i, cut in enumerate(cutlist):
+            start = cut.get("Start(sec)")
+            end = cut.get("End(sec)")
+            text = cut.get("Transcript", "")
+            print(f"🔹 Cut {i}: Start={start}, End={end}, Transcript={text}")
 
-            # フレーム・Excel生成
-            frame_paths = generate_frames(cutlist_data)
-            save_to_excel(cutlist_data)
+            if start is None or end is None:
+                raise ValueError("Start/End missing")
+            start = round(float(start), 1)
+            end = round(float(end), 1)
+            if end <= start:
+                print(f"⚠️ 無効なカット（End <= Start）: Start={start}, End={end}")
+                continue
+            validated.append({
+                "Start(sec)": start,
+                "End(sec)": end,
+                "Transcript": text
+            })
 
-    return render_template("index.html",
-                           video_url="input.mp4" if os.path.exists(VIDEO_PATH) else None,
-                           cutlist=cutlist_data,
-                           frames=frame_paths)
+        validated.sort(key=lambda x: x["Start(sec)"])
+        cutlist_data = validated
+
+        frame_paths = generate_frames(cutlist_data)
+        frame_paths = [f"static/{fp.replace('static/', '').replace(os.sep, '/')}" for fp in frame_paths]
+        save_to_excel(cutlist_data)
+
+        print("✅ カットリストとフレームを正常に更新しました")
+
+        return jsonify({
+            "status": "success",
+            "cutlist": cutlist_data,
+            "frames": frame_paths
+        })
+
+    except Exception as e:
+        print("❌ エラー発生:", str(e))
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
+
 
 # -----------------------------
 # カットリスト更新API
