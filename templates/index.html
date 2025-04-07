@@ -76,7 +76,9 @@
 
   <a class="btn btn-success mt-4" href="{{ url_for('download_excel') }}">📥 Excelファイルをダウンロード</a><br>
   <a class="btn btn-secondary mt-2" href="{{ url_for('download_zip') }}">📦 ZIP一括ダウンロード（Excel＋画像）</a>
-
+　<a class="btn btn-warning mt-2" href="https://script.google.com/a/macros/unou-jikenn.com/s/AKfycbx6X4Mdp5oLdrItp-aZtWTdih4IWp_rzaXrnNYv5glq4v8swtvXa_oAGaC27lt_QFjg/exec" target="_blank">
+  🧾 スライドを自動生成（GASアプリ）
+　</a>
 
   <script>
     let cutlist = {{ cutlist | tojson | safe }};
