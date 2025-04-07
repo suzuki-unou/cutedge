@@ -1,0 +1,6 @@
+static/uploads/
+static/frames/
+uploads/
+*.mp4
+*.xlsx
+__pycache__/

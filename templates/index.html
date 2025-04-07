@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>カットリスト生成AI</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .cut-segment {
+      position: absolute;
+      height: 100%;
+      z-index: 1;
+    }
+    #frame-preview {
+      position: absolute;
+      display: none;
+      pointer-events: none;
+      border: 1px solid #ccc;
+      background: #fff;
+      z-index: 999;
+      padding: 2px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+    #frame-preview img {
+      max-width: 160px;
+      max-height: 90px;
+      display: block;
+    }
+    .frame-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .frame-actions {
+      display: none;
+      background-color: rgba(0, 0, 0, 0.6);
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .frame-card:hover .frame-actions {
+      display: flex;
+    }
+  </style>
+</head>
+<body class="container py-5">
+  <h2 class="mb-4">🎬 動画からカットリストを自動生成</h2>
+
+  <form method="POST" enctype="multipart/form-data">
+    <input class="form-control mb-3" type="file" name="video" accept=".mp4" required>
+    <button class="btn btn-primary" type="submit">解析スタート</button>
+  </form>
+  <div id="loading-indicator" class="text-center my-4" style="display: none;">
+  <div class="spinner-border text-primary" role="status">
+    <span class="visually-hidden">Loading...</span>
+  </div>
+  <p class="mt-2">解析中です...（数分かかる場合があります）</p>
+</div>
+
+  {% if video_url %}
+    <hr>
+    <h4 class="mt-4">🎥 アップロードした動画</h4>
+    <video id="videoPlayer" class="w-100 mb-2" controls preload="metadata">
+      <source src="{{ url_for('static', filename='uploads/' + video_url) }}" type="video/mp4">
+    </video>
+    <div id="cut-timeline" class="position-relative mb-4" style="height: 16px; background-color: #eee; border-radius: 8px;"></div>
+    <div id="frame-preview"></div>
+  {% endif %}
+
+  <div id="frame-gallery" class="row row-cols-2 row-cols-md-4 g-4 mb-4"></div>
+  <div id="cutlist-area"></div>
+
+  <a class="btn btn-success mt-4" href="{{ url_for('download_excel') }}">📥 Excelファイルをダウンロード</a><br>
+  <a class="btn btn-secondary mt-2" href="{{ url_for('download_zip') }}">📦 ZIP一括ダウンロード（Excel＋画像）</a>
+
+
+  <script>
+    let cutlist = {{ cutlist | tojson | safe }};
+    let frames = {{ frames | tojson | safe }};
+    const colors = ["#007bff", "#28a745", "#dc3545", "#ffc107", "#17a2b8", "#6f42c1"];
+    let videoDuration = 0;
+
+    function renderTimeline() {
+      const video = document.getElementById("videoPlayer");
+      const timeline = document.getElementById("cut-timeline");
+      const framePreview = document.getElementById("frame-preview");
+      if (!video || !timeline || !videoDuration) return;
+
+      timeline.innerHTML = "";
+      cutlist.forEach((cut, index) => {
+        const start = parseFloat(cut["Start(sec)"]);
+        const end = parseFloat(cut["End(sec)"]);
+        if (isNaN(start) || isNaN(end) || end <= start) return;
+
+        const div = document.createElement("div");
+        div.className = "cut-segment";
+        div.style.left = `${(start / videoDuration) * 100}%`;
+        div.style.width = `${((end - start) / videoDuration) * 100}%`;
+        div.style.backgroundColor = colors[index % colors.length];
+
+        div.addEventListener("mousemove", (e) => {
+          const frameUrl = frames[index];
+          framePreview.innerHTML = `<img src="/static/${frameUrl.split('static/')[1]}?t=${Date.now()}" alt="frame">`;
+          framePreview.style.display = "block";
+          framePreview.style.top = `${e.pageY - 100}px`;
+          framePreview.style.left = `${e.pageX + 20}px`;
+        });
+        div.addEventListener("mouseleave", () => {
+          framePreview.style.display = "none";
+        });
+        div.addEventListener("click", () => {
+          video.currentTime = start;
+          video.play();
+          window.previewEndTime = end;
+        });
+
+        timeline.appendChild(div);
+      });
+    }
+
+    function renderFrameGallery() {
+      const gallery = document.getElementById("frame-gallery");
+      gallery.innerHTML = "";
+      frames.forEach((frame, index) => {
+        const col = document.createElement("div");
+        col.className = "col";
+        col.innerHTML = `
+          <div class="card frame-card" data-index="${index}">
+            <img src="/static/${frame.split('static/')[1]}?t=${Date.now()}" class="card-img-top" alt="frame">
+
+            <div class="frame-actions">
+              <button class="btn btn-sm btn-danger" onclick="markDeleteAndSave(${index})">🗑 カット削除</button>
+              <button class="btn btn-sm btn-secondary" onclick="shiftCutEarlier(${index})">← 開始0.5秒前</button>
+              <button class="btn btn-sm btn-secondary" onclick="shiftCutLater(${index})">開始0.5秒後 →</button>
+              <button class="btn btn-sm btn-primary" onclick="addCutAfter(${index})">➕ 次にカット追加</button>
+            </div>
+          </div>`;
+        gallery.appendChild(col);
+      });
+    }
+
+    function renderCutlistForm() {
+      const area = document.getElementById("cutlist-area");
+      let html = `
+      <form id="cutlist-form">
+        <hr><h4 class="mt-4">📝 カットリスト（編集可能）</h4>
+        <div class="table-responsive"><table class="table table-bordered"><thead><tr>
+        <th>#</th><th>開始</th><th>終了</th><th>セリフ</th><th>削除</th></tr></thead><tbody>`;
+
+      cutlist.forEach((row, i) => {
+        html += `
+        <tr>
+          <td>${i + 1}</td>
+          <td><input class="form-control" type="number" step="any" name="start_${i}" value="${row["Start(sec)"].toFixed(1)}" onchange="saveCutlist()"></td>
+          <td><input class="form-control" type="number" step="any" name="end_${i}" value="${row["End(sec)"].toFixed(1)}" onchange="saveCutlist()"></td>
+          <td><input class="form-control" type="text" name="text_${i}" value="${row["Transcript"] || ""}" onchange="saveCutlist()"></td>
+          <td><input type="checkbox" name="delete_${i}" onchange="saveCutlist()"></td>
+        </tr>`;
+      });
+
+      html += `</tbody></table></div>
+        <input type="hidden" name="total_rows" value="${cutlist.length}">
+        <h5 class="mt-4">➕ カット追加</h5>
+        <div class="row g-2">
+          <div class="col-md-2"><input class="form-control" name="add_start" placeholder="開始秒" type="number" step="any" oninput="saveCutlist()"></div>
+          <div class="col-md-2"><input class="form-control" name="add_end" placeholder="終了秒" type="number" step="any" oninput="saveCutlist()"></div>
+          <div class="col-md-6"><input class="form-control" name="add_text" placeholder="セリフ" oninput="saveCutlist()"></div>
+        </div>
+        <button class="btn btn-info mt-3" type="button" onclick="saveCutlist()">💾 手動保存</button>
+      </form>`;
+      area.innerHTML = html;
+    }
+
+    function saveCutlist() {
+  const form = document.getElementById("cutlist-form");
+  const total = parseInt(form.querySelector("[name='total_rows']").value);
+  const updated = [];
+
+  for (let i = 0; i < total; i++) {
+    const deleted = form.querySelector(`[name="delete_${i}"]`)?.checked;
+    if (deleted) continue;
+    const start = parseFloat(form.querySelector(`[name="start_${i}"]`)?.value);
+    const end = parseFloat(form.querySelector(`[name="end_${i}"]`)?.value);
+    const text = form.querySelector(`[name="text_${i}"]`)?.value;
+    if (!isNaN(start) && !isNaN(end)) {
+      updated.push({ "Start(sec)": start, "End(sec)": end, "Transcript": text });
+    }
+  }
+
+  // 追加カットの処理
+  const addStart = parseFloat(form.querySelector("[name='add_start']").value);
+  const addEnd = parseFloat(form.querySelector("[name='add_end']").value);
+  const addText = form.querySelector("[name='add_text']").value;
+  if (!isNaN(addStart) && !isNaN(addEnd)) {
+    updated.push({ "Start(sec)": addStart, "End(sec)": addEnd, "Transcript": addText });
+    form.querySelector("[name='add_start']").value = "";
+    form.querySelector("[name='add_end']").value = "";
+    form.querySelector("[name='add_text']").value = "";
+  }
+
+  // ✅ 開始秒数で並び替え
+  updated.sort((a, b) => a["Start(sec)"] - b["Start(sec)"]);
+
+  // ✅ 終了時間を次の開始時間の0.1秒前に自動設定
+  for (let i = 0; i < updated.length - 1; i++) {
+    updated[i]["End(sec)"] = parseFloat((updated[i + 1]["Start(sec)"] - 0.1).toFixed(1));
+  }
+  // 最後のカットの終了時間はそのまま（上書きしない）
+
+  // ✅ サーバーへ送信
+  fetch("/api/update-cutlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cutlist: updated })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === "success" && data.cutlist) {
+        cutlist = data.cutlist;
+        frames = data.frames || frames;
+        renderCutlistForm();
+        renderTimeline();
+        renderFrameGallery();
+      } else {
+        alert("❌ 保存失敗：" + (data.message || "不明なエラー"));
+      }
+    })
+    .catch(err => alert("❌ 通信エラー：" + err));
+}
+
+
+    function markDeleteAndSave(index) {
+      const checkbox = document.querySelector(`[name="delete_${index}"]`);
+      if (checkbox) checkbox.checked = true;
+      saveCutlist();
+    }
+
+    function shiftCutEarlier(index) {
+      const input = document.querySelector(`[name="start_${index}"]`);
+      const prev = document.querySelector(`[name="end_${index - 1}"]`);
+      if (input) {
+        const v = parseFloat(input.value) - 0.5;
+        input.value = v.toFixed(1);
+        if (prev) prev.value = v.toFixed(1);
+        saveCutlist();
+      }
+    }
+
+    function shiftCutLater(index) {
+      const input = document.querySelector(`[name="start_${index}"]`);
+      if (input) {
+        const v = parseFloat(input.value) + 0.5;
+        input.value = v.toFixed(1);
+        saveCutlist();
+      }
+    }
+
+    function addCutAfter(index) {
+  const s1 = parseFloat(document.querySelector(`[name="start_${index}"]`)?.value);
+  const s2 = parseFloat(document.querySelector(`[name="start_${index + 1}"]`)?.value);
+  const e1 = parseFloat(document.querySelector(`[name="end_${index}"]`)?.value);
+
+  let mid;
+  if (!isNaN(s1) && !isNaN(s2)) {
+    // 通常：このカットと次のカットの中間
+    mid = ((s1 + s2) / 2).toFixed(1);
+  } else if (!isNaN(s1) && !isNaN(e1)) {
+    // 最後のカット：開始と終了の中間
+    mid = ((s1 + e1) / 2).toFixed(1);
+  } else {
+    alert("開始・終了秒数が取得できませんでした");
+    return;
+  }
+
+  document.querySelector("[name='add_start']").value = mid;
+  document.querySelector("[name='add_end']").value = (parseFloat(mid) + 1).toFixed(1);
+  document.querySelector("[name='add_text']").focus();
+  saveCutlist();
+}
+
+
+    document.addEventListener("DOMContentLoaded", () => {
+  const video = document.getElementById("videoPlayer");
+
+  if (video) {
+    video.addEventListener("loadedmetadata", () => {
+      videoDuration = video.duration;
+      renderTimeline();
+    });
+
+    // ✅ カット再生終了タイミングを監視するイベント
+    video.addEventListener("timeupdate", () => {
+      if (window.previewEndTime && video.currentTime >= window.previewEndTime) {
+        video.pause();
+        window.previewEndTime = null;
+      }
+    });
+  }
+
+  renderCutlistForm();
+  renderFrameGallery();
+});
+document.querySelector("form")?.addEventListener("submit", () => {
+  document.getElementById("loading-indicator").style.display = "block";
+});
+  </script>
+</body>
+</html>
