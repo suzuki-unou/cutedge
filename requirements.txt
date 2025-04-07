@@ -6,3 +6,4 @@ whisper
 torch
 torchaudio
 openai-whisper
+xlsxwriter
