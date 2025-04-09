@@ -101,11 +101,18 @@ def index():
                 file.save(VIDEO_PATH)
 
         elif 'drive_url' in request.form:
-            print("🌐 Google Drive URLモード")
-            url = request.form.get("drive_url", "")
-            file_id = url.split("/d/")[-1].split("/")[0]
-            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-            gdown.download(f"https://drive.google.com/uc?id={file_id}", VIDEO_PATH, quiet=False)
+    print("🌐 Google Drive URLモード")
+    url = request.form.get("drive_url", "")
+    file_id = url.split("/d/")[-1].split("/")[0]
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    
+    download_url = f"https://drive.google.com/uc?id={file_id}"
+    output_path = VIDEO_PATH
+    result = gdown.download(download_url, output_path, quiet=False)
+
+    if result is None or not os.path.exists(output_path):
+        return render_template("index.html", error="Google Driveから動画のダウンロードに失敗しました。リンクの共有設定をご確認ください。")
+
 
         else:
             return render_template("index.html", error="ファイルが選択されていません")
