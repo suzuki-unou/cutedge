@@ -97,11 +97,9 @@ def index():
     global cutlist_data, frame_paths
 
     if request.method == "POST":
-        cutlist_data = []
-        frame_paths = []
         result = None
 
-        # ファイルアップロード
+        # ファイルアップロードモード
         if 'video' in request.files and request.files['video'].filename != '':
             print("📤 ファイルアップロードモード")
             file = request.files["video"]
@@ -109,7 +107,7 @@ def index():
             file.save(VIDEO_PATH)
             result = VIDEO_PATH
 
-        # Google Drive URL指定
+        # Google Drive URLモード
         elif 'drive_url' in request.form and request.form.get("drive_url", "").strip():
             print("🌐 Google Drive URLモード")
             url = request.form.get("drive_url", "").strip()
@@ -119,23 +117,27 @@ def index():
                 download_url = f"https://drive.google.com/uc?id={file_id}"
                 output_path = VIDEO_PATH
                 result = gdown.download(download_url, output_path, quiet=False)
-                print("✅ ダウンロード完了")
             except Exception as e:
-                print("❌ Google Driveからのダウンロード中にエラー:", str(e))
-                return render_template("index.html", error="Google DriveのURLから動画取得に失敗しました。")
+                print("❌ Driveダウンロード中の例外:", e)
+                return render_template("index.html", error="Google DriveのURL処理に失敗しました。")
 
+        # ▼ ここでファイル確認
         if result is None or not os.path.exists(VIDEO_PATH):
-            print("❌ 動画ファイル取得失敗")
+            print("❌ 動画ファイルが存在しません")
             return render_template("index.html", error="動画の取得に失敗しました。ファイルかURLをご確認ください。")
+        else:
+            print("📁 動画ファイルパス:", VIDEO_PATH)
+            print("📦 ファイルサイズ:", round(os.path.getsize(VIDEO_PATH) / 1024**2, 2), "MB")
 
         try:
-            print("🚀 カット検出処理を実行します")
+            print("🚀 detect_cuts を呼び出す直前")
             cutlist_data = detect_cuts(VIDEO_PATH)
+            # cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
             frame_paths = generate_frames(cutlist_data)
             save_to_excel(cutlist_data)
         except Exception as e:
-            print("❌ カット検出エラー:", str(e))
-            return render_template("index.html", error="カット検出に失敗しました。")
+            print("❌ detect_cuts() 呼び出し中に例外:", str(e))
+            return render_template("index.html", error="カット検出中にエラーが発生しました。")
 
     return render_template("index.html",
                            video_url="input.mp4" if os.path.exists(VIDEO_PATH) else None,
