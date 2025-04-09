@@ -6,9 +6,10 @@ import cv2
 import xlsxwriter
 import zipfile
 import io
+import gdown
 from scenedetect import VideoManager, SceneManager
 from scenedetect.detectors import ContentDetector
-#import whisper  # Whisperの追加
+# import whisper  # Whisperの追加
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
@@ -16,13 +17,9 @@ FRAME_FOLDER = 'static/frames'
 VIDEO_PATH = os.path.join(UPLOAD_FOLDER, 'input.mp4')
 EXCEL_PATH = 'static/cutlist.xlsx'
 
-# グローバル変数
 cutlist_data = []
 frame_paths = []
 
-# -----------------------------
-# フレーム画像をカットごとに生成
-# -----------------------------
 def generate_frames(cutlist, video_path=VIDEO_PATH, output_dir=FRAME_FOLDER):
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -45,16 +42,10 @@ def generate_frames(cutlist, video_path=VIDEO_PATH, output_dir=FRAME_FOLDER):
     cap.release()
     return frame_paths
 
-# -----------------------------
-# Excelとして保存
-# -----------------------------
 def save_to_excel(cutlist, path=EXCEL_PATH):
     df = pd.DataFrame(cutlist)
     df.to_excel(path, index=False)
 
-# -----------------------------
-# PySceneDetectによるカット検出
-# -----------------------------
 def detect_cuts(video_path):
     video_manager = VideoManager([video_path])
     scene_manager = SceneManager()
@@ -75,45 +66,40 @@ def detect_cuts(video_path):
     video_manager.release()
     return cutlist
 
-# -----------------------------
-# Whisperでトランスクリプト生成
-
 # def generate_transcripts(cutlist, video_path=VIDEO_PATH):
-    #model = whisper.load_model("small")  # 他に tiny / small / medium / large もOK
-    #result = model.transcribe(video_path, language='ja')
+#     model = whisper.load_model("small")
+#     result = model.transcribe(video_path, language='ja')
+#     segments = result.get("segments", [])
+#     for cut in cutlist:
+#         start = cut["Start(sec)"]
+#         end = cut["End(sec)"]
+#         texts = [seg["text"] for seg in segments if seg["start"] < end and seg["end"] > start]
+#         cut["Transcript"] = "".join(texts).strip()
+#     return cutlist
 
-    #segments = result.get("segments", [])
-    #for cut in cutlist:
-     #   start = cut["Start(sec)"]
-      #  end = cut["End(sec)"]
-       # texts = [seg["text"] for seg in segments if seg["start"] < end and seg["end"] > start]
-        #cut["Transcript"] = "".join(texts).strip()
-
-    #return cutlist
-
-# -----------------------------
-# メインページ
-# -----------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     global cutlist_data, frame_paths
 
     if request.method == "POST":
-        file = request.files["video"]
-        if file:
-            # 保存フォルダ初期化
+        drive_url = request.form.get("drive_url")
+        if drive_url:
             shutil.rmtree(FRAME_FOLDER, ignore_errors=True)
             os.makedirs(FRAME_FOLDER, exist_ok=True)
             os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-            # 動画保存
-            file.save(VIDEO_PATH)
+            # Google Drive URL → ID だけ抽出
+            if "id=" in drive_url:
+                file_id = drive_url.split("id=")[-1].split("&")[0]
+            elif "file/d/" in drive_url:
+                file_id = drive_url.split("file/d/")[-1].split("/")[0]
+            else:
+                return render_template("index.html", error="URLの形式が正しくありません")
 
-            # カット検出＋トランスクリプト
+            gdown.download(f"https://drive.google.com/uc?id={file_id}", VIDEO_PATH, quiet=False)
+
             cutlist_data = detect_cuts(VIDEO_PATH)
-            #cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
-
-            # フレーム・Excel生成
+            # cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
             frame_paths = generate_frames(cutlist_data)
             save_to_excel(cutlist_data)
 
@@ -122,34 +108,23 @@ def index():
                            cutlist=cutlist_data,
                            frames=frame_paths)
 
-# -----------------------------
-# カットリスト更新API
-# -----------------------------
 @app.route("/api/update-cutlist", methods=["POST"])
 def update_cutlist():
     global cutlist_data, frame_paths
     try:
-        print("✅ /api/update-cutlist にアクセスされた")
-
         data = request.get_json(force=True)
-        print("📥 受信データ:", data)
-
         cutlist = data.get("cutlist", [])
-        print(f"📊 カット数: {len(cutlist)} 件")
-
         validated = []
-        for i, cut in enumerate(cutlist):
+
+        for cut in cutlist:
             start = cut.get("Start(sec)")
             end = cut.get("End(sec)")
             text = cut.get("Transcript", "")
-            print(f"🔹 Cut {i}: Start={start}, End={end}, Transcript={text}")
-
             if start is None or end is None:
                 raise ValueError("Start/End missing")
             start = round(float(start), 1)
             end = round(float(end), 1)
             if end <= start:
-                print(f"⚠️ 無効なカット（End <= Start）: Start={start}, End={end}")
                 continue
             validated.append({
                 "Start(sec)": start,
@@ -159,14 +134,9 @@ def update_cutlist():
 
         validated.sort(key=lambda x: x["Start(sec)"])
         cutlist_data = validated
-
         frame_paths = generate_frames(cutlist_data)
         frame_paths = [f"static/{fp.replace('static/', '').replace(os.sep, '/')}" for fp in frame_paths]
-
-        print("📝 Excelに保存するcutlist_data：", cutlist_data)
         save_to_excel(cutlist_data)
-
-        print("✅ カットリストとフレームを正常に更新しました")
 
         return jsonify({
             "status": "success",
@@ -175,32 +145,22 @@ def update_cutlist():
         })
 
     except Exception as e:
-        print("❌ エラー発生:", str(e))
         return jsonify({
             "status": "error",
             "message": str(e)
         })
 
-
-
-# -----------------------------
-# Excel ダウンロード
-# -----------------------------
 @app.route("/download_excel")
 def download_excel():
     return send_file(EXCEL_PATH, as_attachment=True)
 
 @app.route("/download_zip")
 def download_zip():
-    save_to_excel(cutlist_data)  # ✅ 念のためここでも保存する
-
+    save_to_excel(cutlist_data)
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-        # Excelファイルを追加
         if os.path.exists(EXCEL_PATH):
             zipf.write(EXCEL_PATH, arcname="cutlist.xlsx")
-
-        # フレーム画像を追加
         if os.path.exists(FRAME_FOLDER):
             for filename in sorted(os.listdir(FRAME_FOLDER)):
                 filepath = os.path.join(FRAME_FOLDER, filename)
@@ -215,12 +175,7 @@ def download_zip():
         mimetype="application/zip"
     )
 
-
-# -----------------------------
-# アプリ起動
-# -----------------------------
 if __name__ == "__main__":
-    # 初期化
     if os.path.exists(VIDEO_PATH):
         os.remove(VIDEO_PATH)
     if os.path.exists(EXCEL_PATH):
@@ -228,5 +183,5 @@ if __name__ == "__main__":
     if os.path.exists(FRAME_FOLDER):
         shutil.rmtree(FRAME_FOLDER)
 
-    port = int(os.environ.get("PORT", 10000))  # ←ここ！Render用にポート取得
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
