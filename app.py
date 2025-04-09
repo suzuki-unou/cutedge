@@ -65,7 +65,9 @@ def detect_cuts(video_path):
     scene_manager = SceneManager()
     scene_manager.add_detector(ContentDetector(threshold=30.0))
 
+    print("📦 video_manager.start() 実行中...")
     video_manager.start()
+    print("✅ video_manager.start() 完了")
     scene_manager.detect_scenes(frame_source=video_manager)
     scene_list = scene_manager.get_scene_list()
     video_manager.release()
