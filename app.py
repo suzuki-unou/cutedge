@@ -117,6 +117,32 @@ def index():
                 download_url = f"https://drive.google.com/uc?id={file_id}"
                 output_path = VIDEO_PATH
                 result = gdown.download(download_url, output_path, quiet=False)
+            import time
+
+            # Driveダウンロード後の確認処理
+            if result is None or not os.path.exists(VIDEO_PATH):
+                print("❌ 動画ファイルの取得に失敗")
+                return render_template("index.html", error="動画の取得に失敗しました。")
+            
+            # 確実に書き込み完了するまで少し待つ
+            for i in range(5):
+                if os.path.exists(VIDEO_PATH) and os.path.getsize(VIDEO_PATH) > 10_000_000:
+                    print(f"✅ 動画ファイル確認: {os.path.getsize(VIDEO_PATH)} bytes")
+                    break
+                print("⌛ ファイルがまだ書き込み中？待機中...")
+                time.sleep(1)
+            else:
+                return render_template("index.html", error="動画ファイルのサイズ確認に失敗しました。")
+            
+            # OpenCVで本当に開けるか確認
+            cap = cv2.VideoCapture(VIDEO_PATH)
+            if not cap.isOpened():
+                print("❌ OpenCVで動画を開けませんでした")
+                return render_template("index.html", error="動画ファイルが壊れているか、対応していません。")
+            else:
+                print("🎉 OpenCVでの読み込み成功")
+            cap.release()
+
             except Exception as e:
                 print("❌ Driveダウンロード中の例外:", e)
                 return render_template("index.html", error="Google DriveのURL処理に失敗しました。")
