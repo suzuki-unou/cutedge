@@ -47,13 +47,26 @@ def save_to_excel(cutlist, path=EXCEL_PATH):
     df.to_excel(path, index=False)
 
 def detect_cuts(video_path):
+    print("📹 detect_cuts(): 処理開始")
+    
     video_manager = VideoManager([video_path])
+    
+    # ✅ 高速化：解像度を下げて処理（品質は少し落ちるけどかなり速くなる）
+    video_manager.set_downscale_factor(2)  # 1 = オリジナル, 2 = 半分, 4 = 1/4
+    
     scene_manager = SceneManager()
     scene_manager.add_detector(ContentDetector(threshold=30.0))
 
+    print("⏳ video_manager.start() 実行前")
     video_manager.start()
+    print("✅ video_manager.start() 実行後")
+
+    print("🔍 シーン検出 開始")
     scene_manager.detect_scenes(frame_source=video_manager)
+    print("✅ detect_scenes 実行後")
+
     scene_list = scene_manager.get_scene_list()
+    print(f"🎞 検出されたシーン数: {len(scene_list)}")
 
     cutlist = []
     for i, (start_time, end_time) in enumerate(scene_list):
@@ -64,7 +77,10 @@ def detect_cuts(video_path):
         })
 
     video_manager.release()
+    print("✅ video_manager.release() 実行完了")
+    
     return cutlist
+
 
 # def generate_transcripts(cutlist, video_path=VIDEO_PATH):
 #     model = whisper.load_model("small")
