@@ -50,11 +50,15 @@
 <body class="container py-5">
   <h2 class="mb-4">🎬 動画からカットリストを自動生成</h2>
 
-  <form method="POST">
-    <label>Google Driveの共有URLを入力してください：</label>
-    <input class="form-control mb-3" type="text" name="drive_url" placeholder="https://drive.google.com/file/d/..." required>
-    <button class="btn btn-primary" type="submit">解析スタート</button>
-  </form>
+<form method="POST" enctype="multipart/form-data">
+  <label class="form-label">ローカル動画ファイル（.mp4）</label>
+  <input class="form-control mb-3" type="file" name="video" accept=".mp4">
+  
+  <label class="form-label mt-3">または Google Drive の共有URL</label>
+  <input class="form-control mb-3" type="text" name="drive_url" placeholder="https://drive.google.com/file/d/...">
+  
+  <button class="btn btn-primary" type="submit">解析スタート</button>
+</form>
   <div id="loading-indicator" class="text-center my-4" style="display: none;">
   <div class="spinner-border text-primary" role="status">
     <span class="visually-hidden">Loading...</span>
