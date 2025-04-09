@@ -91,6 +91,8 @@ def index():
     global cutlist_data, frame_paths
 
     if request.method == "POST":
+        result = None  # ← 最初に初期化しないと if result〜で NameError になる
+
         if 'video' in request.files:
             print("📤 ファイルアップロードモード")
             file = request.files["video"]
@@ -99,24 +101,23 @@ def index():
                 os.makedirs(FRAME_FOLDER, exist_ok=True)
                 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
                 file.save(VIDEO_PATH)
+                result = VIDEO_PATH  # 成功の証
 
         elif 'drive_url' in request.form:
-    print("🌐 Google Drive URLモード")
-    url = request.form.get("drive_url", "")
-    file_id = url.split("/d/")[-1].split("/")[0]
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    
-    download_url = f"https://drive.google.com/uc?id={file_id}"
-    output_path = VIDEO_PATH
-    result = gdown.download(download_url, output_path, quiet=False)
+            print("🌐 Google Drive URLモード")
+            url = request.form.get("drive_url", "")
+            file_id = url.split("/d/")[-1].split("/")[0]
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-    if result is None or not os.path.exists(output_path):
-        return render_template("index.html", error="Google Driveから動画のダウンロードに失敗しました。リンクの共有設定をご確認ください。")
+            download_url = f"https://drive.google.com/uc?id={file_id}"
+            output_path = VIDEO_PATH
+            result = gdown.download(download_url, output_path, quiet=False)
 
+        # ✅ どちらの方式でも result が必要
+        if result is None or not os.path.exists(VIDEO_PATH):
+            return render_template("index.html", error="動画の取得に失敗しました。ファイルかURLをご確認ください。")
 
-        else:
-            return render_template("index.html", error="ファイルが選択されていません")
-
+        # ✅ カット処理はファイル取得成功後に共通でやる
         cutlist_data = detect_cuts(VIDEO_PATH)
         #cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
         frame_paths = generate_frames(cutlist_data)
