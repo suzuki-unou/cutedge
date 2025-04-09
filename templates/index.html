@@ -51,14 +51,19 @@
   <h2 class="mb-4">🎬 動画からカットリストを自動生成</h2>
 
 <form method="POST" enctype="multipart/form-data">
-  <label class="form-label">ローカル動画ファイル（.mp4）</label>
-  <input class="form-control mb-3" type="file" name="video" accept=".mp4">
+  <label class="form-label">動画ファイルをアップロード</label>
+  <input class="form-control mb-2" type="file" name="video" accept=".mp4">
   
-  <label class="form-label mt-3">または Google Drive の共有URL</label>
+  <label class="form-label mt-3">または Google Drive の共有URLを入力</label>
   <input class="form-control mb-3" type="text" name="drive_url" placeholder="https://drive.google.com/file/d/...">
   
   <button class="btn btn-primary" type="submit">解析スタート</button>
 </form>
+
+{% if error %}
+<div class="alert alert-danger mt-3">{{ error }}</div>
+{% endif %}
+
   <div id="loading-indicator" class="text-center my-4" style="display: none;">
   <div class="spinner-border text-primary" role="status">
     <span class="visually-hidden">Loading...</span>
