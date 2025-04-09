@@ -9,7 +9,7 @@ import io
 import gdown
 from scenedetect import VideoManager, SceneManager
 from scenedetect.detectors import ContentDetector
-# import whisper  # Whisperはコメントアウトのまま
+# import whisper  # Whisperの追加（※コメントアウト中）
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
@@ -17,6 +17,7 @@ FRAME_FOLDER = 'static/frames'
 VIDEO_PATH = os.path.join(UPLOAD_FOLDER, 'input.mp4')
 EXCEL_PATH = 'static/cutlist.xlsx'
 
+# グローバル変数
 cutlist_data = []
 frame_paths = []
 
@@ -58,7 +59,7 @@ def save_to_excel(cutlist, path=EXCEL_PATH):
 def detect_cuts(video_path):
     print("📹 detect_cuts(): 処理開始")
     video_manager = VideoManager([video_path])
-    video_manager.set_downscale_factor(2)  # ✅ 高速化設定
+    video_manager.set_downscale_factor(2)
     scene_manager = SceneManager()
     scene_manager.add_detector(ContentDetector(threshold=30.0))
 
@@ -66,9 +67,8 @@ def detect_cuts(video_path):
     scene_manager.detect_scenes(frame_source=video_manager)
     scene_list = scene_manager.get_scene_list()
 
-    print(f"✂️ カット検出完了: {len(scene_list)}件")
     cutlist = []
-    for start_time, end_time in scene_list:
+    for i, (start_time, end_time) in enumerate(scene_list):
         cutlist.append({
             "Start(sec)": round(start_time.get_seconds(), 1),
             "End(sec)": round(end_time.get_seconds(), 1),
@@ -76,7 +76,22 @@ def detect_cuts(video_path):
         })
 
     video_manager.release()
+    print(f"✅ カット数: {len(cutlist)}")
     return cutlist
+
+# -----------------------------
+# Whisperでトランスクリプト生成（未使用）
+# -----------------------------
+# def generate_transcripts(cutlist, video_path=VIDEO_PATH):
+#     model = whisper.load_model("small")
+#     result = model.transcribe(video_path, language='ja')
+#     segments = result.get("segments", [])
+#     for cut in cutlist:
+#         start = cut["Start(sec)"]
+#         end = cut["End(sec)"]
+#         texts = [seg["text"] for seg in segments if seg["start"] < end and seg["end"] > start]
+#         cut["Transcript"] = "".join(texts).strip()
+#     return cutlist
 
 # -----------------------------
 # メインページ
@@ -86,58 +101,43 @@ def index():
     global cutlist_data, frame_paths
 
     if request.method == "POST":
-        video_provided = False
         result = None
 
-        if 'video' in request.files:
+        # ファイルアップロードモード
+        if 'video' in request.files and request.files['video'].filename != '':
             print("📤 ファイルアップロードモード")
             file = request.files["video"]
-            if file:
-                shutil.rmtree(FRAME_FOLDER, ignore_errors=True)
-                os.makedirs(FRAME_FOLDER, exist_ok=True)
-                os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-                file.save(VIDEO_PATH)
-                video_provided = True
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            file.save(VIDEO_PATH)
+            result = VIDEO_PATH
 
-        elif 'drive_url' in request.form:
+        # Google Drive URLモード
+        elif 'drive_url' in request.form and request.form.get("drive_url", "").strip():
             print("🌐 Google Drive URLモード")
-            url = request.form.get("drive_url", "")
-            print(f"🔗 入力されたURL: {url}")
+            url = request.form.get("drive_url", "").strip()
             try:
-                # 多様な形式に対応（id=〜 or /d/〜）
-                if "id=" in url:
-                    file_id = url.split("id=")[-1].split("&")[0]
-                elif "/d/" in url:
-                    file_id = url.split("/d/")[-1].split("/")[0]
-                else:
-                    raise ValueError("URL形式が不正です")
-
-                print(f"🆔 抽出したfile_id: {file_id}")
+                file_id = url.split("/d/")[-1].split("/")[0]
                 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
                 download_url = f"https://drive.google.com/uc?id={file_id}"
-                print(f"📥 ダウンロードURL: {download_url}")
-
-                result = gdown.download(download_url, VIDEO_PATH, quiet=False)
-
-                if result and os.path.exists(VIDEO_PATH):
-                    print("✅ ダウンロード成功")
-                    video_provided = True
-                else:
-                    print("❌ ダウンロード失敗またはファイル存在しない")
-                    return render_template("index.html", error="Google Driveから動画のダウンロードに失敗しました。リンクの共有設定をご確認ください。", cutlist=[], frames=[])
-
+                output_path = VIDEO_PATH
+                result = gdown.download(download_url, output_path, quiet=False)
             except Exception as e:
-                print("❌ Driveダウンロード処理で例外:", str(e))
-                return render_template("index.html", error=f"URL処理中にエラー: {str(e)}", cutlist=[], frames=[])
+                print("❌ Driveダウンロード中の例外:", e)
+                return render_template("index.html", error="Google DriveのURL処理に失敗しました。")
 
-        if not video_provided:
-            return render_template("index.html", error="動画の取得に失敗しました。ファイルかURLをご確認ください。", cutlist=[], frames=[])
+        if result is None or not os.path.exists(VIDEO_PATH):
+            print("❌ 動画ファイルの取得に失敗")
+            return render_template("index.html", error="動画の取得に失敗しました。ファイルかURLをご確認ください。")
 
-        cutlist_data = detect_cuts(VIDEO_PATH)
-        # cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)  # Whisper処理（今は使わない）
-        frame_paths = generate_frames(cutlist_data)
-        save_to_excel(cutlist_data)
+        try:
+            print("🚀 カット検出開始")
+            cutlist_data = detect_cuts(VIDEO_PATH)
+            # cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
+            frame_paths = generate_frames(cutlist_data)
+            save_to_excel(cutlist_data)
+        except Exception as e:
+            print("❌ カット検出エラー:", str(e))
+            return render_template("index.html", error="カット検出に失敗しました。")
 
     return render_template("index.html",
                            video_url="input.mp4" if os.path.exists(VIDEO_PATH) else None,
@@ -152,26 +152,19 @@ def update_cutlist():
     global cutlist_data, frame_paths
     try:
         print("✅ /api/update-cutlist にアクセスされた")
-
         data = request.get_json(force=True)
-        print("📥 受信データ:", data)
-
         cutlist = data.get("cutlist", [])
-        print(f"📊 カット数: {len(cutlist)} 件")
-
         validated = []
+
         for i, cut in enumerate(cutlist):
             start = cut.get("Start(sec)")
             end = cut.get("End(sec)")
             text = cut.get("Transcript", "")
-            print(f"🔹 Cut {i}: Start={start}, End={end}, Transcript={text}")
-
             if start is None or end is None:
-                raise ValueError("Start/End missing")
+                continue
             start = round(float(start), 1)
             end = round(float(end), 1)
             if end <= start:
-                print(f"⚠️ 無効なカット（End <= Start）: Start={start}, End={end}")
                 continue
             validated.append({
                 "Start(sec)": start,
@@ -181,14 +174,9 @@ def update_cutlist():
 
         validated.sort(key=lambda x: x["Start(sec)"])
         cutlist_data = validated
-
         frame_paths = generate_frames(cutlist_data)
         frame_paths = [f"static/{fp.replace('static/', '').replace(os.sep, '/')}" for fp in frame_paths]
-
-        print("📝 Excelに保存するcutlist_data：", cutlist_data)
         save_to_excel(cutlist_data)
-
-        print("✅ カットリストとフレームを正常に更新しました")
 
         return jsonify({
             "status": "success",
@@ -197,19 +185,18 @@ def update_cutlist():
         })
 
     except Exception as e:
-        print("❌ エラー発生:", str(e))
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        })
+        return jsonify({"status": "error", "message": str(e)})
 
 # -----------------------------
-# Excel/ZIP ダウンロード
+# Excel ダウンロード
 # -----------------------------
 @app.route("/download_excel")
 def download_excel():
     return send_file(EXCEL_PATH, as_attachment=True)
 
+# -----------------------------
+# ZIP ダウンロード（Excel + Frames）
+# -----------------------------
 @app.route("/download_zip")
 def download_zip():
     save_to_excel(cutlist_data)
@@ -233,7 +220,7 @@ def download_zip():
     )
 
 # -----------------------------
-# 起動
+# アプリ起動
 # -----------------------------
 if __name__ == "__main__":
     if os.path.exists(VIDEO_PATH):
