@@ -59,6 +59,12 @@ def save_to_excel(cutlist, path=EXCEL_PATH):
 # カット検出
 # ----------------------------------------
 def detect_cuts(video_path):
+    print("🧪 OpenCVで動画オープンテスト")
+    cap = cv2.VideoCapture("static/uploads/input.mp4")
+    if not cap.isOpened():
+        print("❌ 動画ファイルを開けません")
+    else:
+        print("✅ 動画ファイルオープン成功")
     print("📹 detect_cuts(): カット検出処理開始")
     video_manager = VideoManager([video_path])
     video_manager.set_downscale_factor(2)
