@@ -50,26 +50,30 @@
 <body class="container py-5">
   <h2 class="mb-4">🎬 動画からカットリストを自動生成</h2>
 
-<form method="POST" enctype="multipart/form-data">
-  <label class="form-label">動画ファイルをアップロード</label>
-  <input class="form-control mb-2" type="file" name="video" accept=".mp4">
-  
-  <label class="form-label mt-3">または Google Drive の共有URLを入力</label>
-  <input class="form-control mb-3" type="text" name="drive_url" placeholder="https://drive.google.com/file/d/...">
-  
-  <button class="btn btn-primary" type="submit">解析スタート</button>
-</form>
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
 
-{% if error %}
-<div class="alert alert-danger mt-3">{{ error }}</div>
-{% endif %}
+  <form method="POST" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label class="form-label">① ローカル動画ファイル（mp4）を選択</label>
+      <input class="form-control" type="file" name="video" accept=".mp4">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">② もしくはGoogle Driveの共有URLを入力</label>
+      <input class="form-control" type="text" name="drive_url" placeholder="https://drive.google.com/file/d/XXXX/view?usp=sharing">
+    </div>
+
+    <button class="btn btn-primary" type="submit">解析スタート</button>
+  </form>
 
   <div id="loading-indicator" class="text-center my-4" style="display: none;">
-  <div class="spinner-border text-primary" role="status">
-    <span class="visually-hidden">Loading...</span>
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2">解析中です...（数分かかる場合があります）</p>
   </div>
-  <p class="mt-2">解析中です...（数分かかる場合があります）</p>
-</div>
 
   {% if video_url %}
     <hr>
@@ -85,10 +89,10 @@
   <div id="cutlist-area"></div>
 
   <a class="btn btn-success mt-4" href="{{ url_for('download_excel') }}">📥 Excelファイルをダウンロード</a><br>
-  <a class="btn btn-secondary mt-2" href="{{ url_for('download_zip') }}">📦 ZIP一括ダウンロード（Excel＋画像）</a>
-　<a class="btn btn-warning mt-2" href="https://script.google.com/a/macros/unou-jikenn.com/s/AKfycbx6X4Mdp5oLdrItp-aZtWTdih4IWp_rzaXrnNYv5glq4v8swtvXa_oAGaC27lt_QFjg/exec" target="_blank">
-  🧾 スライドを自動生成（GASアプリ）
-　</a>
+  <a class="btn btn-secondary mt-2" href="{{ url_for('download_zip') }}">📦 ZIP一括ダウンロード（Excel＋画像）</a><br>
+  <a class="btn btn-warning mt-2" href="https://script.google.com/a/macros/unou-jikenn.com/s/AKfycbx6X4Mdp5oLdrItp-aZtWTdih4IWp_rzaXrnNYv5glq4v8swtvXa_oAGaC27lt_QFjg/exec" target="_blank">
+    🧾 スライドを自動生成（GASアプリ）
+  </a>
 
   <script>
     let cutlist = {{ cutlist | tojson | safe }};
@@ -143,7 +147,6 @@
         col.innerHTML = `
           <div class="card frame-card" data-index="${index}">
             <img src="/static/${frame.split('static/')[1]}?t=${Date.now()}" class="card-img-top" alt="frame">
-
             <div class="frame-actions">
               <button class="btn btn-sm btn-danger" onclick="markDeleteAndSave(${index})">🗑 カット削除</button>
               <button class="btn btn-sm btn-secondary" onclick="shiftCutEarlier(${index})">← 開始0.5秒前</button>
@@ -188,63 +191,56 @@
     }
 
     function saveCutlist() {
-  const form = document.getElementById("cutlist-form");
-  const total = parseInt(form.querySelector("[name='total_rows']").value);
-  const updated = [];
+      const form = document.getElementById("cutlist-form");
+      const total = parseInt(form.querySelector("[name='total_rows']").value);
+      const updated = [];
 
-  for (let i = 0; i < total; i++) {
-    const deleted = form.querySelector(`[name="delete_${i}"]`)?.checked;
-    if (deleted) continue;
-    const start = parseFloat(form.querySelector(`[name="start_${i}"]`)?.value);
-    const end = parseFloat(form.querySelector(`[name="end_${i}"]`)?.value);
-    const text = form.querySelector(`[name="text_${i}"]`)?.value;
-    if (!isNaN(start) && !isNaN(end)) {
-      updated.push({ "Start(sec)": start, "End(sec)": end, "Transcript": text });
-    }
-  }
-
-  // 追加カットの処理
-  const addStart = parseFloat(form.querySelector("[name='add_start']").value);
-  const addEnd = parseFloat(form.querySelector("[name='add_end']").value);
-  const addText = form.querySelector("[name='add_text']").value;
-  if (!isNaN(addStart) && !isNaN(addEnd)) {
-    updated.push({ "Start(sec)": addStart, "End(sec)": addEnd, "Transcript": addText });
-    form.querySelector("[name='add_start']").value = "";
-    form.querySelector("[name='add_end']").value = "";
-    form.querySelector("[name='add_text']").value = "";
-  }
-
-  // ✅ 開始秒数で並び替え
-  updated.sort((a, b) => a["Start(sec)"] - b["Start(sec)"]);
-
-  // ✅ 終了時間を次の開始時間の0.1秒前に自動設定
-  for (let i = 0; i < updated.length - 1; i++) {
-    updated[i]["End(sec)"] = parseFloat((updated[i + 1]["Start(sec)"] - 0.1).toFixed(1));
-  }
-
-  // ✅ サーバーへ送信して保存・ZIPの元データも更新
-  fetch("/api/update-cutlist", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cutlist: updated })
-  })
-    .then(res => res.json())
-    .then(data => {
-      if (data.status === "success" && data.cutlist) {
-        cutlist = data.cutlist;
-        frames = data.frames || frames;
-        renderCutlistForm();
-        renderTimeline();
-        renderFrameGallery();
-        alert("✅ カットリストを保存しました！");
-      } else {
-        alert("❌ 保存失敗：" + (data.message || "不明なエラー"));
+      for (let i = 0; i < total; i++) {
+        const deleted = form.querySelector(`[name="delete_${i}"]`)?.checked;
+        if (deleted) continue;
+        const start = parseFloat(form.querySelector(`[name="start_${i}"]`)?.value);
+        const end = parseFloat(form.querySelector(`[name="end_${i}"]`)?.value);
+        const text = form.querySelector(`[name="text_${i}"]`)?.value;
+        if (!isNaN(start) && !isNaN(end)) {
+          updated.push({ "Start(sec)": start, "End(sec)": end, "Transcript": text });
+        }
       }
-    })
-    .catch(err => alert("❌ 通信エラー：" + err));
-}
 
+      const addStart = parseFloat(form.querySelector("[name='add_start']").value);
+      const addEnd = parseFloat(form.querySelector("[name='add_end']").value);
+      const addText = form.querySelector("[name='add_text']").value;
+      if (!isNaN(addStart) && !isNaN(addEnd)) {
+        updated.push({ "Start(sec)": addStart, "End(sec)": addEnd, "Transcript": addText });
+        form.querySelector("[name='add_start']").value = "";
+        form.querySelector("[name='add_end']").value = "";
+        form.querySelector("[name='add_text']").value = "";
+      }
 
+      updated.sort((a, b) => a["Start(sec)"] - b["Start(sec)"]);
+      for (let i = 0; i < updated.length - 1; i++) {
+        updated[i]["End(sec)"] = parseFloat((updated[i + 1]["Start(sec)"] - 0.1).toFixed(1));
+      }
+
+      fetch("/api/update-cutlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cutlist: updated })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === "success" && data.cutlist) {
+            cutlist = data.cutlist;
+            frames = data.frames || frames;
+            renderCutlistForm();
+            renderTimeline();
+            renderFrameGallery();
+            alert("✅ カットリストを保存しました！");
+          } else {
+            alert("❌ 保存失敗：" + (data.message || "不明なエラー"));
+          }
+        })
+        .catch(err => alert("❌ 通信エラー：" + err));
+    }
 
     function markDeleteAndSave(index) {
       const checkbox = document.querySelector(`[name="delete_${index}"]`);
@@ -273,53 +269,50 @@
     }
 
     function addCutAfter(index) {
-  const s1 = parseFloat(document.querySelector(`[name="start_${index}"]`)?.value);
-  const s2 = parseFloat(document.querySelector(`[name="start_${index + 1}"]`)?.value);
-  const e1 = parseFloat(document.querySelector(`[name="end_${index}"]`)?.value);
+      const s1 = parseFloat(document.querySelector(`[name="start_${index}"]`)?.value);
+      const s2 = parseFloat(document.querySelector(`[name="start_${index + 1}"]`)?.value);
+      const e1 = parseFloat(document.querySelector(`[name="end_${index}"]`)?.value);
 
-  let mid;
-  if (!isNaN(s1) && !isNaN(s2)) {
-    // 通常：このカットと次のカットの中間
-    mid = ((s1 + s2) / 2).toFixed(1);
-  } else if (!isNaN(s1) && !isNaN(e1)) {
-    // 最後のカット：開始と終了の中間
-    mid = ((s1 + e1) / 2).toFixed(1);
-  } else {
-    alert("開始・終了秒数が取得できませんでした");
-    return;
-  }
+      let mid;
+      if (!isNaN(s1) && !isNaN(s2)) {
+        mid = ((s1 + s2) / 2).toFixed(1);
+      } else if (!isNaN(s1) && !isNaN(e1)) {
+        mid = ((s1 + e1) / 2).toFixed(1);
+      } else {
+        alert("開始・終了秒数が取得できませんでした");
+        return;
+      }
 
-  document.querySelector("[name='add_start']").value = mid;
-  document.querySelector("[name='add_end']").value = (parseFloat(mid) + 1).toFixed(1);
-  document.querySelector("[name='add_text']").focus();
-  saveCutlist();
-}
-
+      document.querySelector("[name='add_start']").value = mid;
+      document.querySelector("[name='add_end']").value = (parseFloat(mid) + 1).toFixed(1);
+      document.querySelector("[name='add_text']").focus();
+      saveCutlist();
+    }
 
     document.addEventListener("DOMContentLoaded", () => {
-  const video = document.getElementById("videoPlayer");
+      const video = document.getElementById("videoPlayer");
 
-  if (video) {
-    video.addEventListener("loadedmetadata", () => {
-      videoDuration = video.duration;
-      renderTimeline();
-    });
+      if (video) {
+        video.addEventListener("loadedmetadata", () => {
+          videoDuration = video.duration;
+          renderTimeline();
+        });
 
-    // ✅ カット再生終了タイミングを監視するイベント
-    video.addEventListener("timeupdate", () => {
-      if (window.previewEndTime && video.currentTime >= window.previewEndTime) {
-        video.pause();
-        window.previewEndTime = null;
+        video.addEventListener("timeupdate", () => {
+          if (window.previewEndTime && video.currentTime >= window.previewEndTime) {
+            video.pause();
+            window.previewEndTime = null;
+          }
+        });
       }
-    });
-  }
 
-  renderCutlistForm();
-  renderFrameGallery();
-});
-document.querySelector("form")?.addEventListener("submit", () => {
-  document.getElementById("loading-indicator").style.display = "block";
-});
+      renderCutlistForm();
+      renderFrameGallery();
+    });
+
+    document.querySelector("form")?.addEventListener("submit", () => {
+      document.getElementById("loading-indicator").style.display = "block";
+    });
   </script>
 </body>
 </html>
