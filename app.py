@@ -122,5 +122,6 @@ def update_cutlist():
     frame_paths = generate_frames(VIDEO_PATH, cutlist)
     return jsonify({'frames': frame_paths})
 
-if __name__ == '__main__':
-    app.run(debug=True, port=10000)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))  # Renderが自動でPORT環境変数を渡してくる
+    app.run(host="0.0.0.0", port=port)
