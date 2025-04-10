@@ -22,27 +22,43 @@ frame_paths = []
 # フレーム画像生成
 # ----------------------------------------
 def generate_frames(cutlist, video_path=VIDEO_PATH, output_dir=FRAME_FOLDER):
-    print("🖼️ フレーム生成開始")
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
+    print("🖼️ フレーム生成（軽量化版）開始")
     os.makedirs(output_dir, exist_ok=True)
-
     cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    frame_cache = {}
     frame_paths = []
 
     for i, cut in enumerate(cutlist):
         t = cut["Start(sec)"]
-        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        frame_index = int(t * fps)
+        frame_filename = f"frame_{int(t*10):05d}.jpg"  # 秒数ベースでキャッシュ名を決定（例: 12.3秒→frame_00123.jpg）
+        frame_path = os.path.join(output_dir, frame_filename)
+
+        if os.path.exists(frame_path):
+            # すでにキャッシュ画像が存在
+            frame_paths.append(frame_path)
+            continue
+
+        # OpenCVで該当フレーム取得
+        if frame_index >= total_frames:
+            print(f"⚠️ フレーム番号 {frame_index} は動画の長さを超えています")
+            frame_paths.append("")
+            continue
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
         if ret:
-            frame_path = os.path.join(output_dir, f"frame_{i}.jpg")
             cv2.imwrite(frame_path, frame)
             frame_paths.append(frame_path)
         else:
+            print(f"⚠️ フレーム {frame_index} の読み込みに失敗")
             frame_paths.append("")
 
     cap.release()
-    print(f"✅ フレーム生成完了: {len(frame_paths)} 枚")
+    print(f"✅ フレーム生成完了（軽量化）: {len(frame_paths)} 枚")
     return frame_paths
 
 # ----------------------------------------
