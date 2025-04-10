@@ -1,3 +1,4 @@
+
 from flask import Flask, request, render_template, jsonify, send_file
 import os
 import shutil
@@ -6,8 +7,9 @@ import cv2
 import zipfile
 import io
 import gdown
-# from scenedetect import VideoManager, SceneManager
-# from scenedetect.detectors import ContentDetector
+import subprocess
+from scenedetect import VideoManager, SceneManager
+from scenedetect.detectors import ContentDetector
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
@@ -19,46 +21,35 @@ cutlist_data = []
 frame_paths = []
 
 # ----------------------------------------
-# フレーム画像生成
+# 軽量化版 generate_frames
 # ----------------------------------------
 def generate_frames(cutlist, video_path=VIDEO_PATH, output_dir=FRAME_FOLDER):
-    print("🖼️ フレーム生成（軽量化版）開始")
+    print("🖼️ フレーム生成（軽量化）開始")
     os.makedirs(output_dir, exist_ok=True)
+
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    frame_cache = {}
     frame_paths = []
 
     for i, cut in enumerate(cutlist):
-        t = cut["Start(sec)"]
-        frame_index = int(t * fps)
-        frame_filename = f"frame_{int(t*10):05d}.jpg"  # 秒数ベースでキャッシュ名を決定（例: 12.3秒→frame_00123.jpg）
+        t = round(cut["Start(sec)"], 1)
+        frame_filename = f"frame_{int(t*10):05d}.jpg"
         frame_path = os.path.join(output_dir, frame_filename)
 
         if os.path.exists(frame_path):
-            # すでにキャッシュ画像が存在
             frame_paths.append(frame_path)
             continue
 
-        # OpenCVで該当フレーム取得
-        if frame_index >= total_frames:
-            print(f"⚠️ フレーム番号 {frame_index} は動画の長さを超えています")
-            frame_paths.append("")
-            continue
-
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
         ret, frame = cap.read()
         if ret:
             cv2.imwrite(frame_path, frame)
             frame_paths.append(frame_path)
         else:
-            print(f"⚠️ フレーム {frame_index} の読み込みに失敗")
             frame_paths.append("")
 
     cap.release()
-    print(f"✅ フレーム生成完了（軽量化）: {len(frame_paths)} 枚")
+    print(f"✅ フレーム生成完了: {len(frame_paths)} 枚")
     return frame_paths
 
 # ----------------------------------------
@@ -70,55 +61,52 @@ def save_to_excel(cutlist, path=EXCEL_PATH):
     df.to_excel(path, index=False)
 
 # ----------------------------------------
-# カット検出（OpenCVでの簡易実装）
+# カット検出（PySceneDetect）
 # ----------------------------------------
 def detect_cuts(video_path):
-    print("📹 detect_cuts(OpenCV) 開始")
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    threshold = 30.0
+    print("📹 detect_cuts(): カット検出処理開始")
+    # ↓ PySceneDetect を一旦コメントアウトして OpenCV に切り替えるならここで切り替え
+    video_manager = VideoManager([video_path])
+    video_manager.set_downscale_factor(2)
+    scene_manager = SceneManager()
+    scene_manager.add_detector(ContentDetector(threshold=30.0))
 
-    last_frame = None
+    video_manager.start()
+    scene_manager.detect_scenes(frame_source=video_manager)
+    scene_list = scene_manager.get_scene_list()
+    video_manager.release()
+
     cutlist = []
-    current_time = 0.0
-    last_cut = 0.0
-
-    frame_count = 0
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame_count += 1
-        current_time = frame_count / fps
-
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        if last_frame is not None:
-            diff = cv2.absdiff(gray, last_frame)
-            score = diff.mean()
-            if score > threshold and current_time - last_cut > 0.5:
-                cutlist.append({
-                    "Start(sec)": round(last_cut, 1),
-                    "End(sec)": round(current_time - 0.1, 1),
-                    "Transcript": ""
-                })
-                last_cut = current_time
-
-        last_frame = gray
-
-    # 最後のカットを追加
-    total_duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps
-    if not cutlist or cutlist[-1]["End(sec)"] < total_duration:
+    for i, (start_time, end_time) in enumerate(scene_list):
         cutlist.append({
-            "Start(sec)": round(last_cut, 1),
-            "End(sec)": round(total_duration, 1),
+            "Start(sec)": round(start_time.get_seconds(), 1),
+            "End(sec)": round(end_time.get_seconds(), 1),
             "Transcript": ""
         })
 
-    cap.release()
     print(f"✅ カット検出完了: {len(cutlist)} カット")
     return cutlist
+
+# ----------------------------------------
+# FFmpegで動画をリサイズ
+# ----------------------------------------
+def resize_video(input_path, max_height=360):
+    print("🔧 FFmpegでリサイズ処理中...")
+    output_path = input_path.replace(".mp4", "_resized.mp4")
+
+    try:
+        subprocess.run([
+            "ffmpeg", "-y", "-i", input_path,
+            "-vf", f"scale=-2:{max_height}",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "copy",
+            output_path
+        ], check=True)
+        print(f"✅ リサイズ完了: {output_path}")
+        return output_path
+    except subprocess.CalledProcessError as e:
+        print(f"❌ FFmpegエラー: {e}")
+        return input_path
 
 # ----------------------------------------
 # メイン画面
@@ -159,9 +147,13 @@ def index():
             print("📁 動画ファイルパス:", VIDEO_PATH)
             print("📦 ファイルサイズ:", round(os.path.getsize(VIDEO_PATH) / 1024**2, 2), "MB")
 
+        # 🔁 FFmpegでリサイズ
+        VIDEO_PATH_RESIZED = resize_video(VIDEO_PATH)
+
         try:
-            cutlist_data = detect_cuts(VIDEO_PATH)
-            frame_paths = generate_frames(cutlist_data, VIDEO_PATH)
+            print("🚀 detect_cuts を呼び出す直前")
+            cutlist_data = detect_cuts(VIDEO_PATH_RESIZED)
+            frame_paths = generate_frames(cutlist_data, VIDEO_PATH_RESIZED)
             save_to_excel(cutlist_data)
         except Exception as e:
             print("❌ detect_cuts() 呼び出し中に例外:", str(e))
