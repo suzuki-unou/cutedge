@@ -54,7 +54,7 @@
     <div class="alert alert-danger">{{ error }}</div>
   {% endif %}
 
-  <form method="POST" enctype="multipart/form-data">
+  <form method="POST" action="/process">
     <div class="mb-3">
       <label class="form-label">① ローカル動画ファイル（mp4）を選択</label>
       <input class="form-control" type="file" name="video" accept=".mp4">
