@@ -4,7 +4,7 @@ pandas
 xlsxwriter
 scenedetect
 gdown
-git+https://github.com/Zulko/moviepy.git@v2.0.0
+moviepy==1.0.3
 imageio==2.31.1
 imageio-ffmpeg==0.4.8
 decorator==5.1.1
