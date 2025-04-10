@@ -4,3 +4,4 @@ pandas
 xlsxwriter
 scenedetect
 gdown
+moviepy
