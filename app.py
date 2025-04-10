@@ -3,13 +3,12 @@ import os
 import shutil
 import pandas as pd
 import cv2
-import xlsxwriter
 import zipfile
 import io
 import gdown
+import subprocess
 from scenedetect import VideoManager, SceneManager
 from scenedetect.detectors import ContentDetector
-# import whisper  # Whisperは未使用
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
@@ -59,21 +58,13 @@ def save_to_excel(cutlist, path=EXCEL_PATH):
 # カット検出
 # ----------------------------------------
 def detect_cuts(video_path):
-    print("🧪 OpenCVで動画オープンテスト")
-    cap = cv2.VideoCapture("static/uploads/input.mp4")
-    if not cap.isOpened():
-        print("❌ 動画ファイルを開けません")
-    else:
-        print("✅ 動画ファイルオープン成功")
     print("📹 detect_cuts(): カット検出処理開始")
     video_manager = VideoManager([video_path])
     video_manager.set_downscale_factor(2)
     scene_manager = SceneManager()
     scene_manager.add_detector(ContentDetector(threshold=30.0))
 
-    print("📦 video_manager.start() 実行中...")
     video_manager.start()
-    print("✅ video_manager.start() 完了")
     scene_manager.detect_scenes(frame_source=video_manager)
     scene_list = scene_manager.get_scene_list()
     video_manager.release()
@@ -88,6 +79,27 @@ def detect_cuts(video_path):
 
     print(f"✅ カット検出完了: {len(cutlist)} カット")
     return cutlist
+
+# ----------------------------------------
+# FFmpegで動画をリサイズ
+# ----------------------------------------
+def resize_video(input_path, max_height=360):
+    print("🔧 FFmpegでリサイズ処理中...")
+    output_path = input_path.replace(".mp4", "_resized.mp4")
+
+    try:
+        subprocess.run([
+            "ffmpeg", "-y", "-i", input_path,
+            "-vf", f"scale=-2:{max_height}",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "copy",
+            output_path
+        ], check=True)
+        print(f"✅ リサイズ完了: {output_path}")
+        return output_path
+    except subprocess.CalledProcessError as e:
+        print(f"❌ FFmpegエラー: {e}")
+        return input_path
 
 # ----------------------------------------
 # メイン画面
@@ -121,7 +133,6 @@ def index():
                 print("❌ Driveダウンロード中の例外:", e)
                 return render_template("index.html", error="Google DriveのURL処理に失敗しました。")
 
-        # ▼ ここでファイル確認
         if result is None or not os.path.exists(VIDEO_PATH):
             print("❌ 動画ファイルが存在しません")
             return render_template("index.html", error="動画の取得に失敗しました。ファイルかURLをご確認ください。")
@@ -129,11 +140,13 @@ def index():
             print("📁 動画ファイルパス:", VIDEO_PATH)
             print("📦 ファイルサイズ:", round(os.path.getsize(VIDEO_PATH) / 1024**2, 2), "MB")
 
+        # 🔁 FFmpegでリサイズ
+        VIDEO_PATH_RESIZED = resize_video(VIDEO_PATH)
+
         try:
             print("🚀 detect_cuts を呼び出す直前")
-            cutlist_data = detect_cuts(VIDEO_PATH)
-            # cutlist_data = generate_transcripts(cutlist_data, VIDEO_PATH)
-            frame_paths = generate_frames(cutlist_data)
+            cutlist_data = detect_cuts(VIDEO_PATH_RESIZED)
+            frame_paths = generate_frames(cutlist_data, VIDEO_PATH_RESIZED)
             save_to_excel(cutlist_data)
         except Exception as e:
             print("❌ detect_cuts() 呼び出し中に例外:", str(e))
