@@ -5,3 +5,7 @@ xlsxwriter
 scenedetect
 gdown
 moviepy
+imageio          # ← moviepyが内部で使う
+imageio-ffmpeg   # ← これないとVideoFileClipが動かない！
+decorator
+tqdm
