@@ -1,4 +1,5 @@
-
+import moviepy
+print("moviepy path:", moviepy.__file__)
 import os
 import shutil
 import zipfile
