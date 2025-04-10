@@ -7,9 +7,8 @@ import cv2
 import zipfile
 import io
 import gdown
-import subprocess
-from scenedetect import VideoManager, SceneManager
-from scenedetect.detectors import ContentDetector
+# from scenedetect import VideoManager, SceneManager
+# from scenedetect.detectors import ContentDetector
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
@@ -20,93 +19,85 @@ EXCEL_PATH = 'static/cutlist.xlsx'
 cutlist_data = []
 frame_paths = []
 
-# ----------------------------------------
-# 軽量化版 generate_frames
-# ----------------------------------------
-def generate_frames(cutlist, video_path=VIDEO_PATH, output_dir=FRAME_FOLDER):
-    print("🖼️ フレーム生成（軽量化）開始")
-    os.makedirs(output_dir, exist_ok=True)
-
+# OpenCVでカット検出（簡易版）
+def detect_cuts(video_path):
+    print("📹 detect_cuts(): OpenCVでカット検出開始")
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
+    cutlist = []
+    prev = None
+    threshold = 30.0
+    min_scene_len = int(fps * 1.0)
+
+    frame_number = 0
+    last_cut = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if prev is not None:
+            diff = cv2.absdiff(gray, prev)
+            score = diff.mean()
+            if score > threshold and (frame_number - last_cut) > min_scene_len:
+                start_sec = round(last_cut / fps, 1)
+                end_sec = round(frame_number / fps, 1)
+                cutlist.append({
+                    "Start(sec)": start_sec,
+                    "End(sec)": end_sec,
+                    "Transcript": ""
+                })
+                last_cut = frame_number
+        prev = gray
+        frame_number += 1
+
+    duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps
+    if not cutlist or cutlist[-1]["End(sec)"] < duration:
+        cutlist.append({
+            "Start(sec)": round(last_cut / fps, 1),
+            "End(sec)": round(duration, 1),
+            "Transcript": ""
+        })
+
+    cap.release()
+    print(f"✅ カット検出完了: {len(cutlist)} カット")
+    return cutlist
+
+# 軽量化 generate_frames（キャッシュ付き）
+def generate_frames(cutlist, video_path=VIDEO_PATH, output_dir=FRAME_FOLDER):
+    print("🖼️ フレーム生成開始（軽量化版）")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+    cap = cv2.VideoCapture(video_path)
+    cache = {}
     frame_paths = []
 
     for i, cut in enumerate(cutlist):
-        t = round(cut["Start(sec)"], 1)
-        frame_filename = f"frame_{int(t*10):05d}.jpg"
-        frame_path = os.path.join(output_dir, frame_filename)
-
-        if os.path.exists(frame_path):
-            frame_paths.append(frame_path)
-            continue
-
-        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-        ret, frame = cap.read()
-        if ret:
-            cv2.imwrite(frame_path, frame)
-            frame_paths.append(frame_path)
+        t = cut["Start(sec)"]
+        if t in cache:
+            frame = cache[t]
         else:
-            frame_paths.append("")
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if not ret:
+                frame_paths.append("")
+                continue
+            cache[t] = frame
+
+        frame_path = os.path.join(output_dir, f"frame_{i}.jpg")
+        cv2.imwrite(frame_path, frame)
+        frame_paths.append(frame_path)
 
     cap.release()
     print(f"✅ フレーム生成完了: {len(frame_paths)} 枚")
     return frame_paths
 
-# ----------------------------------------
 # Excel書き出し
-# ----------------------------------------
 def save_to_excel(cutlist, path=EXCEL_PATH):
     print("📁 Excel書き出し")
     df = pd.DataFrame(cutlist)
     df.to_excel(path, index=False)
-
-# ----------------------------------------
-# カット検出（PySceneDetect）
-# ----------------------------------------
-def detect_cuts(video_path):
-    print("📹 detect_cuts(): カット検出処理開始")
-    # ↓ PySceneDetect を一旦コメントアウトして OpenCV に切り替えるならここで切り替え
-    video_manager = VideoManager([video_path])
-    video_manager.set_downscale_factor(2)
-    scene_manager = SceneManager()
-    scene_manager.add_detector(ContentDetector(threshold=30.0))
-
-    video_manager.start()
-    scene_manager.detect_scenes(frame_source=video_manager)
-    scene_list = scene_manager.get_scene_list()
-    video_manager.release()
-
-    cutlist = []
-    for i, (start_time, end_time) in enumerate(scene_list):
-        cutlist.append({
-            "Start(sec)": round(start_time.get_seconds(), 1),
-            "End(sec)": round(end_time.get_seconds(), 1),
-            "Transcript": ""
-        })
-
-    print(f"✅ カット検出完了: {len(cutlist)} カット")
-    return cutlist
-
-# ----------------------------------------
-# FFmpegで動画をリサイズ
-# ----------------------------------------
-def resize_video(input_path, max_height=360):
-    print("🔧 FFmpegでリサイズ処理中...")
-    output_path = input_path.replace(".mp4", "_resized.mp4")
-
-    try:
-        subprocess.run([
-            "ffmpeg", "-y", "-i", input_path,
-            "-vf", f"scale=-2:{max_height}",
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-c:a", "copy",
-            output_path
-        ], check=True)
-        print(f"✅ リサイズ完了: {output_path}")
-        return output_path
-    except subprocess.CalledProcessError as e:
-        print(f"❌ FFmpegエラー: {e}")
-        return input_path
 
 # ----------------------------------------
 # メイン画面
@@ -147,16 +138,14 @@ def index():
             print("📁 動画ファイルパス:", VIDEO_PATH)
             print("📦 ファイルサイズ:", round(os.path.getsize(VIDEO_PATH) / 1024**2, 2), "MB")
 
-        # 🔁 FFmpegでリサイズ
-        VIDEO_PATH_RESIZED = resize_video(VIDEO_PATH)
+        VIDEO_PATH_RESIZED = VIDEO_PATH  # リサイズスキップ
 
         try:
-            print("🚀 detect_cuts を呼び出す直前")
             cutlist_data = detect_cuts(VIDEO_PATH_RESIZED)
             frame_paths = generate_frames(cutlist_data, VIDEO_PATH_RESIZED)
             save_to_excel(cutlist_data)
         except Exception as e:
-            print("❌ detect_cuts() 呼び出し中に例外:", str(e))
+            print("❌ カット検出中の例外:", str(e))
             return render_template("index.html", error="カット検出中にエラーが発生しました。")
 
     return render_template("index.html",
@@ -164,14 +153,10 @@ def index():
                            cutlist=cutlist_data,
                            frames=frame_paths)
 
-# ----------------------------------------
-# カットリスト更新API
-# ----------------------------------------
 @app.route("/api/update-cutlist", methods=["POST"])
 def update_cutlist():
     global cutlist_data, frame_paths
     try:
-        print("🔄 カットリスト更新リクエスト")
         data = request.get_json(force=True)
         cutlist = data.get("cutlist", [])
         validated = []
@@ -197,9 +182,6 @@ def update_cutlist():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
-# ----------------------------------------
-# ダウンロード系
-# ----------------------------------------
 @app.route("/download_excel")
 def download_excel():
     return send_file(EXCEL_PATH, as_attachment=True)
@@ -219,13 +201,9 @@ def download_zip():
     zip_buffer.seek(0)
     return send_file(zip_buffer, as_attachment=True, download_name="cutlist_and_frames.zip", mimetype="application/zip")
 
-# ----------------------------------------
-# 起動前の初期化
-# ----------------------------------------
 if __name__ == "__main__":
     if os.path.exists(VIDEO_PATH): os.remove(VIDEO_PATH)
     if os.path.exists(EXCEL_PATH): os.remove(EXCEL_PATH)
     if os.path.exists(FRAME_FOLDER): shutil.rmtree(FRAME_FOLDER)
-
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
